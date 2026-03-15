@@ -1,0 +1,49 @@
+[llm]
+base_url = "http://localhost:1234/v1"
+primary_model = "qwen3-vl-8b"
+fallback_model = "qwen2.5-vl-7b"
+timeout_seconds = 120
+retries = 2
+temperature = 0.1
+enable_vlm_repair = true
+
+[retry]
+confidence_threshold = 95.0
+max_route_attempts = 5
+table_repair_attempts = 2
+retry_backoff_seconds = 1.0
+
+[processing]
+max_workers = 2
+include_globs = ["*", "**/*"]
+exclude_globs = ["**/.DS_Store", "**/~$*"]
+
+[ocr]
+enabled = true
+dpi = 300
+deskew = true
+clean = true
+optimize = 0
+language = "eng"
+
+[tables]
+high_effort = true
+important_row_min = 2
+strict_column_consistency = true
+max_empty_ratio = 0.4
+max_duplicate_row_ratio = 0.15
+
+[render]
+image_dpi = 220
+markdown_table_fallback = true
+
+[routing]
+fallback_order = ["markitdown", "docling", "ocr_docling", "tika"]
+min_characters_for_good_extraction = 300
+
+[tika]
+enabled = false
+tika_jar_path = ""
+
+[logging]
+level = "INFO"
