@@ -28,6 +28,7 @@ def build_normalized_document(
 
     title = blocks_to_title(parsed.blocks)
     by_type = _group_blocks(parsed.blocks)
+    blocks_ordered = _ordered_blocks(parsed.blocks)
 
     overall_conf = attempts[-1].confidence.overall if attempts else 0.0
     block_conf = attempts[-1].confidence.block_scores if attempts else {}
@@ -49,8 +50,32 @@ def build_normalized_document(
         block_quotes=by_type["blockquote"],
         figures=by_type["figure"],
         captions=by_type["caption"],
+        blocks_ordered=blocks_ordered,
         warnings=parsed.warnings,
+        notes=parsed.notes,
     )
+
+
+def _ordered_blocks(blocks: list[ContentBlock]) -> list[dict[str, object]]:
+    ordered: list[dict[str, object]] = []
+    for block in blocks:
+        payload: dict[str, object] = {
+            "id": block.block_id,
+            "type": block.block_type,
+            "text": block.text,
+            "confidence": block.confidence,
+            "source": {
+                "page": block.source.page,
+                "sheet": block.source.sheet,
+                "slide": block.source.slide,
+                "file_offset": block.source.file_offset,
+            },
+            "meta": block.meta,
+        }
+        if block.heading_level:
+            payload["level"] = block.heading_level
+        ordered.append(payload)
+    return ordered
 
 
 def _group_blocks(blocks: list[ContentBlock]) -> dict[str, list[dict[str, object]]]:

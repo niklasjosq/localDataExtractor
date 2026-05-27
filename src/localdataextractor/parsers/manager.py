@@ -6,6 +6,7 @@ import tempfile
 from localdataextractor.models import ParsedResult
 from localdataextractor.parsers.base import ParserContext
 from localdataextractor.parsers.docling_parser import DoclingParser
+from localdataextractor.parsers.glm_ocr_parser import GLMOCRParser
 from localdataextractor.parsers.libreoffice_converter import convert_with_libreoffice
 from localdataextractor.parsers.markitdown_parser import MarkItDownParser
 from localdataextractor.parsers.ocr_docling_parser import OCRDoclingParser
@@ -20,6 +21,7 @@ class ParserManager:
         self.docling = DoclingParser()
         self.ocr_docling = OCRDoclingParser()
         self.tika = TikaParser()
+        self.glm_ocr = GLMOCRParser()
 
     def extract(self, parser_name: str, path: Path, context: ParserContext) -> ParsedResult:
         if parser_name == "text":
@@ -32,6 +34,8 @@ class ParserManager:
             return self.ocr_docling.extract(path, context)
         if parser_name == "tika":
             return self.tika.extract(path, context)
+        if parser_name == "glm_ocr":
+            return self.glm_ocr.extract(path, context)
         if parser_name == "libreoffice_markitdown":
             return self._extract_with_libreoffice(path, context, self.markitdown)
         if parser_name == "libreoffice_docling":
@@ -53,6 +57,6 @@ class ParserManager:
                 )
 
             result = parser.extract(converted, context)
-            result.warnings.append("LibreOffice conversion applied")
+            result.notes.append("LibreOffice conversion applied")
             result.artifacts["converted_file"] = str(converted)
             return result

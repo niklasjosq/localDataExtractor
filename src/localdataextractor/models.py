@@ -79,6 +79,7 @@ class ConfidenceReport:
 class ParsedResult:
     parser_name: str
     warnings: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     blocks: list[ContentBlock] = field(default_factory=list)
     tables: list[TableBlock] = field(default_factory=list)
@@ -128,7 +129,9 @@ class NormalizedDocument:
     block_quotes: list[dict[str, Any]] = field(default_factory=list)
     figures: list[dict[str, Any]] = field(default_factory=list)
     captions: list[dict[str, Any]] = field(default_factory=list)
+    blocks_ordered: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
     below_threshold: bool = False
 
 

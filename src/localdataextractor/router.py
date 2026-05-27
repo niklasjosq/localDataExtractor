@@ -18,7 +18,26 @@ def get_file_info(path: Path) -> FileInfo:
     return FileInfo(path=path, extension=path.suffix.lower(), size=path.stat().st_size)
 
 
-def plan_routes(file_info: FileInfo, config: AppConfig) -> list[RouteDecision]:
+_GLM_OCR_EXTENSIONS = {
+    ".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp",
+}
+
+
+def plan_routes(
+    file_info: FileInfo, config: AppConfig,
+) -> list[RouteDecision]:
+    mode = config.routing.extraction_mode
+
+    if mode == "highest_accuracy":
+        return _plan_highest_accuracy(file_info, config)
+    if mode == "glm_ocr":
+        return _plan_glm_ocr_primary(file_info, config)
+    return _plan_standard(file_info, config)
+
+
+def _plan_standard(
+    file_info: FileInfo, config: AppConfig,
+) -> list[RouteDecision]:
     ext = file_info.extension
     routes: list[RouteDecision] = []
 
@@ -111,6 +130,39 @@ def plan_routes(file_info: FileInfo, config: AppConfig) -> list[RouteDecision]:
             reason="Unknown type fallback route.",
         )
     ]
+
+
+def _plan_glm_ocr_primary(
+    file_info: FileInfo, config: AppConfig,
+) -> list[RouteDecision]:
+    routes: list[RouteDecision] = []
+    ext = file_info.extension
+
+    if ext in _GLM_OCR_EXTENSIONS:
+        routes.append(RouteDecision(
+            route_id="glm_ocr_primary",
+            parser="glm_ocr",
+            reason="GLM-OCR vision model for high-accuracy extraction.",
+        ))
+
+    routes.extend(_plan_standard(file_info, config))
+    return routes
+
+
+def _plan_highest_accuracy(
+    file_info: FileInfo, config: AppConfig,
+) -> list[RouteDecision]:
+    routes = _plan_standard(file_info, config)
+    ext = file_info.extension
+
+    if ext in _GLM_OCR_EXTENSIONS:
+        routes.append(RouteDecision(
+            route_id="accuracy_glm_ocr",
+            parser="glm_ocr",
+            reason="GLM-OCR added for highest-accuracy comparison.",
+        ))
+
+    return routes
 
 
 def _filter_tika(routes: list[RouteDecision], config: AppConfig) -> list[RouteDecision]:

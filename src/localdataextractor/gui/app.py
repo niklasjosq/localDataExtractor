@@ -9,6 +9,7 @@ try:
     from PySide6.QtCore import QObject, Qt, QThread, Signal
     from PySide6.QtWidgets import (
         QApplication,
+        QComboBox,
         QFileDialog,
         QGridLayout,
         QHBoxLayout,
@@ -25,7 +26,9 @@ try:
         QWidget,
     )
 except Exception as exc:  # pragma: no cover
-    raise RuntimeError("PySide6 is required for GUI. Install with `pip install PySide6`") from exc
+    raise RuntimeError(
+        "PySide6 is required for GUI. Install with `uv pip install PySide6` or `uv pip install -e .[full]`"
+    ) from exc
 
 from localdataextractor.config import load_config
 from localdataextractor.pipeline import IngestionPipeline
@@ -75,6 +78,7 @@ class PipelineWorker(QObject):
         output_dir: Path,
         resume_state: Path | None = None,
         explain_route: bool = True,
+        extraction_mode: str = "standard",
     ) -> None:
         super().__init__()
         self.mode = mode
@@ -83,10 +87,19 @@ class PipelineWorker(QObject):
         self.output_dir = output_dir
         self.resume_state = resume_state
         self.explain_route = explain_route
+        self.extraction_mode = extraction_mode
 
     def run(self) -> None:
         try:
             config = load_config(self.config_path)
+            if self.extraction_mode != "standard":
+                config.routing.extraction_mode = (
+                    self.extraction_mode
+                )
+            if self.extraction_mode in (
+                "glm_ocr", "highest_accuracy",
+            ):
+                config.glm_ocr.enabled = True
             pipeline = IngestionPipeline(config)
 
             def callback(progress):
@@ -148,6 +161,23 @@ class MainWindow(QMainWindow):
         io_row.addWidget(pick_output_btn)
         layout.addLayout(io_row)
 
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel("Extraction Mode:"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems([
+            "Standard",
+            "GLM-OCR (Vision LLM)",
+            "Highest Accuracy (All Methods)",
+        ])
+        self.mode_combo.setCurrentIndex(0)
+        self.mode_combo.currentIndexChanged.connect(
+            self._on_mode_changed,
+        )
+        mode_row.addWidget(self.mode_combo)
+        self.glm_status_label = QLabel("")
+        mode_row.addWidget(self.glm_status_label)
+        layout.addLayout(mode_row)
+
         controls = QHBoxLayout()
         self.start_btn = QPushButton("Start")
         self.start_btn.clicked.connect(self._start_ingest)
@@ -195,6 +225,39 @@ class MainWindow(QMainWindow):
     def _current_paths(self) -> list[str]:
         return [self.drop_list.item(i).text() for i in range(self.drop_list.count())]
 
+    def _on_mode_changed(self, index: int) -> None:
+        if index == 0:
+            self.glm_status_label.setText("")
+            return
+        self.glm_status_label.setText("Checking GLM-OCR...")
+        try:
+            from localdataextractor.llm.client import (
+                LMStudioClient,
+            )
+            from localdataextractor.config import (
+                LLMConfig,
+            )
+            client = LMStudioClient(LLMConfig())
+            ok, detail = client.check_server()
+            if ok:
+                models = client.list_models()
+                if "glm-ocr" in models:
+                    self.glm_status_label.setText(
+                        "GLM-OCR: available"
+                    )
+                else:
+                    self.glm_status_label.setText(
+                        "GLM-OCR: model not loaded"
+                    )
+            else:
+                self.glm_status_label.setText(
+                    "LM Studio: not reachable"
+                )
+        except Exception:
+            self.glm_status_label.setText(
+                "LM Studio: connection error"
+            )
+
     def _choose_output(self) -> None:
         selected = QFileDialog.getExistingDirectory(self, "Select output folder")
         if selected:
@@ -211,6 +274,15 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "No input", "Drop at least one file or folder.")
             return
 
+        mode_map = {
+            0: "standard",
+            1: "glm_ocr",
+            2: "highest_accuracy",
+        }
+        extraction_mode = mode_map.get(
+            self.mode_combo.currentIndex(), "standard",
+        )
+
         output_dir = Path(self.output_input.text()).expanduser().resolve()
         self._start_worker(
             PipelineWorker(
@@ -219,6 +291,7 @@ class MainWindow(QMainWindow):
                 input_paths=paths,
                 output_dir=output_dir,
                 explain_route=True,
+                extraction_mode=extraction_mode,
             )
         )
 

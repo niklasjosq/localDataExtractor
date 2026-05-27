@@ -30,6 +30,12 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--verbose", action="store_true")
     ingest.add_argument("--max-workers", type=int, default=None)
     ingest.add_argument("--explain-route", action="store_true")
+    ingest.add_argument(
+        "--mode",
+        choices=["standard", "glm_ocr", "highest_accuracy"],
+        default="standard",
+        help="Extraction mode",
+    )
 
     resume = sub.add_parser("resume", help="Resume from job_state.json")
     resume.add_argument("job_state", type=Path)
@@ -98,6 +104,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     if args.verbose:
         config.logging.level = "DEBUG"
+    if args.mode != "standard":
+        config.routing.extraction_mode = args.mode
+        if args.mode in ("glm_ocr", "highest_accuracy"):
+            config.glm_ocr.enabled = True
     _print_startup_check(config)
 
     pipeline = IngestionPipeline(config)

@@ -18,7 +18,7 @@ class OCRDoclingParser:
     def extract(self, path: Path, context: ParserContext) -> ParsedResult:
         if path.suffix.lower() != ".pdf":
             result = self._docling.extract(path, context)
-            result.warnings.append("ocr_docling route used on non-PDF input")
+            result.notes.append("ocr_docling route used on non-PDF input")
             return result
 
         with tempfile.TemporaryDirectory(prefix="localdataextractor-ocr-") as tmp:
@@ -30,6 +30,6 @@ class OCRDoclingParser:
                 return result
 
             result = self._docling.extract(ocr_pdf, context)
-            result.warnings.append("OCRmyPDF pre-processing applied")
+            result.notes.append("OCRmyPDF pre-processing applied")
             result.artifacts["ocr_pdf"] = str(ocr_pdf)
             return result

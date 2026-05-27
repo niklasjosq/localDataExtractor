@@ -274,9 +274,16 @@ class IngestionPipeline:
         attempts: list[ExtractionAttempt] = list(prior_state.attempts)
         route_history: list[RouteDecision] = []
 
-        for route_index, route in enumerate(routes[: self.config.retry.max_route_attempts], start=1):
+        is_highest_accuracy = (
+            self.config.routing.extraction_mode == "highest_accuracy"
+        )
+        max_attempts = (
+            len(routes) if is_highest_accuracy
+            else self.config.retry.max_route_attempts
+        )
+
+        for route_index, route in enumerate(routes[:max_attempts], start=1):
             route_history.append(route)
-            max_attempts = min(len(routes), self.config.retry.max_route_attempts)
             if progress_callback:
                 progress_callback(
                     IngestProgress(
@@ -359,7 +366,8 @@ class IngestionPipeline:
                 best_doc = doc
                 best_conf = scoring.report.overall
                 best_route = route.route_id
-                break
+                if not is_highest_accuracy:
+                    break
 
             retries += 1
 

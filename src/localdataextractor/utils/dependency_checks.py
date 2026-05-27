@@ -121,4 +121,20 @@ def run_startup_validation(config: AppConfig) -> StartupValidationResult:
         )
     )
 
+    mode = config.routing.extraction_mode
+    if config.glm_ocr.enabled or mode in (
+        "glm_ocr", "highest_accuracy",
+    ):
+        models = llm_client.list_models() if llm_ok else []
+        model = config.glm_ocr.model_name
+        found = model in models
+        statuses.append(
+            DependencyStatus(
+                name="GLM-OCR Model",
+                available=found,
+                required=(mode == "glm_ocr"),
+                detail=f"model={model}",
+            )
+        )
+
     return StartupValidationResult(statuses=statuses)

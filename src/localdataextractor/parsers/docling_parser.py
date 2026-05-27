@@ -6,6 +6,7 @@ from typing import Any
 from localdataextractor.models import ParsedResult, SourceReference, TableBlock
 from localdataextractor.parsers.base import ParserContext
 from localdataextractor.parsers.common import markdown_to_blocks_and_tables, plain_text_to_blocks
+from localdataextractor.parsers.table_extractors import extract_tables_multi
 
 
 class DoclingParser:
@@ -35,17 +36,24 @@ class DoclingParser:
             warnings.append(f"Docling unavailable/failed: {exc}")
 
         table_candidates: list[TableBlock] = []
+        notes: list[str] = []
         if path.suffix.lower() == ".pdf":
-            table_candidates, table_warnings = extract_pdf_tables_with_pdfplumber(path)
+            table_candidates, table_warnings, table_notes = (
+                extract_tables_multi(path, context.config)
+            )
             warnings.extend(table_warnings)
+            notes.extend(table_notes)
 
         if markdown_text.strip():
             blocks, tables = markdown_to_blocks_and_tables(markdown_text)
             if table_candidates:
-                tables.extend(table_candidates)
+                tables = _replace_or_extend_tables(
+                    tables, table_candidates,
+                )
             return ParsedResult(
                 parser_name=self.name,
                 warnings=warnings,
+                notes=notes,
                 blocks=blocks,
                 tables=tables,
                 route_notes=route_notes,
@@ -58,11 +66,30 @@ class DoclingParser:
         return ParsedResult(
             parser_name=self.name,
             warnings=warnings,
+            notes=notes,
             blocks=blocks,
             tables=table_candidates,
             route_notes=route_notes,
             scanned_hint=scanned_hint,
         )
+
+
+def _replace_or_extend_tables(
+    inline_tables: list[TableBlock],
+    extracted: list[TableBlock],
+) -> list[TableBlock]:
+    """Prefer extracted (PDF-grounded) tables but keep inline ones
+    that don't have a same-page peer in the extracted set."""
+    extracted_pages = {
+        t.source.page for t in extracted if t.source.page is not None
+    }
+    out = list(extracted)
+    for inline in inline_tables:
+        if inline.source.page not in extracted_pages:
+            out.append(inline)
+    for idx, t in enumerate(out, start=1):
+        t.table_id = f"tbl_{idx:05d}"
+    return out
 
 
 def _fallback_text_extract(path: Path) -> tuple[str, list[str]]:

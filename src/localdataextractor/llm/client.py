@@ -19,6 +19,42 @@ class LLMResponse:
     error: str = ""
 
 
+def _repair_json_string(raw: str) -> dict[str, Any] | None:
+    """Best-effort recovery of the first balanced JSON object in raw."""
+    if not raw:
+        return None
+    start = raw.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(raw)):
+        ch = raw[i]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                candidate = raw[start:i + 1]
+                try:
+                    return json.loads(candidate)
+                except Exception:
+                    return None
+    return None
+
+
 class LMStudioClient:
     def __init__(self, config: LLMConfig) -> None:
         self.config = config
@@ -59,6 +95,65 @@ class LMStudioClient:
         except Exception:
             return []
 
+    def _chat_vision(
+        self,
+        model: str,
+        system_prompt: str,
+        user_text: str,
+        images_b64: list[str],
+        timeout: int | None = None,
+        temperature: float | None = None,
+    ) -> LLMResponse:
+        content: list[dict[str, Any]] = [
+            {"type": "text", "text": user_text},
+        ]
+        for img in images_b64:
+            img_url = f"data:image/png;base64,{img}"
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": img_url},
+            })
+        temp = (
+            self.config.temperature
+            if temperature is None
+            else temperature
+        )
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content},
+            ],
+            "temperature": temp,
+            "response_format": {"type": "json_object"},
+        }
+        t = timeout or self.config.timeout_seconds
+        url = (
+            f"{self.config.base_url.rstrip('/')}"
+            "/chat/completions"
+        )
+        raw = ""
+        try:
+            resp = requests.post(
+                url, json=payload, timeout=t,
+            )
+            if resp.status_code != 200:
+                msg = resp.text[:200]
+                return LLMResponse(
+                    False, model, {},
+                    f"HTTP {resp.status_code}: {msg}",
+                )
+            data = resp.json()
+            raw = data["choices"][0]["message"]["content"]
+            parsed = json.loads(raw)
+            return LLMResponse(True, model, parsed)
+        except json.JSONDecodeError as exc:
+            return LLMResponse(
+                False, model, {"_raw": raw}, f"json: {exc}",
+            )
+        except Exception as exc:
+            return LLMResponse(False, model, {}, str(exc))
+
     def _chat_json(self, model: str, system_prompt: str, user_prompt: str) -> LLMResponse:
         payload = {
             "model": model,
@@ -92,6 +187,36 @@ class LMStudioClient:
                 if response.ok:
                     return response
         return LLMResponse(False, models_to_try[-1], {}, "all model attempts failed")
+
+    def request_vision_ocr(
+        self,
+        model: str,
+        system_prompt: str,
+        user_text: str,
+        images_b64: list[str],
+        timeout: int | None = None,
+        temperature: float | None = None,
+    ) -> LLMResponse:
+        last_error = ""
+        for _ in range(self.config.retries + 1):
+            response = self._chat_vision(
+                model, system_prompt, user_text,
+                images_b64, timeout, temperature,
+            )
+            if response.ok:
+                return response
+            last_error = response.error
+            raw = ""
+            if isinstance(response.content, dict):
+                raw = str(response.content.get("_raw", ""))
+            if raw:
+                repaired = _repair_json_string(raw)
+                if repaired is not None:
+                    return LLMResponse(True, model, repaired)
+        return LLMResponse(
+            False, model, {},
+            last_error or "all vision OCR attempts failed",
+        )
 
     def repair_table(self, table: TableBlock) -> tuple[TableBlock, str | None]:
         if not self.config.enable_vlm_repair:

@@ -1,7 +1,7 @@
 [llm]
-base_url = "http://localhost:1234/v1"
-primary_model = "qwen3-vl-8b"
-fallback_model = "qwen2.5-vl-7b"
+base_url = "http://127.0.0.1:1234/v1"
+primary_model = "glm-ocr"
+fallback_model = "glm-ocr"
 timeout_seconds = 120
 retries = 2
 temperature = 0.1
@@ -33,6 +33,25 @@ strict_column_consistency = true
 max_empty_ratio = 0.4
 max_duplicate_row_ratio = 0.15
 
+[table_extraction]
+pdfplumber_lines = true
+pdfplumber_text = true
+pdfplumber_lines_strict = true
+camelot_lattice = true
+camelot_stream = true
+bbox_overlap_threshold = 0.5
+min_table_score = 40.0
+
+[image_preprocess]
+enabled = true
+grayscale = true
+deskew = true
+denoise = true
+binarize = true
+binarize_method = "sauvola"  # sauvola | otsu | none
+margin_trim = true
+target_long_edge = 2400
+
 [render]
 image_dpi = 220
 markdown_table_fallback = true
@@ -40,6 +59,18 @@ markdown_table_fallback = true
 [routing]
 fallback_order = ["markitdown", "docling", "ocr_docling", "tika"]
 min_characters_for_good_extraction = 300
+extraction_mode = "standard"  # standard | glm_ocr | highest_accuracy
+
+[glm_ocr]
+enabled = true
+model_name = "glm-ocr"
+page_dpi = 300
+max_pages = 50
+timeout_seconds = 180
+use_pypdfium2 = true
+temperature_override = 0.0
+table_retry_enabled = true
+table_retry_dpi = 400
 
 [tika]
 enabled = false
