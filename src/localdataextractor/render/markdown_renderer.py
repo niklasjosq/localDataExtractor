@@ -5,8 +5,52 @@ from localdataextractor.models import NormalizedDocument, TableBlock
 
 def render_markdown(document: NormalizedDocument) -> str:
     if document.blocks_ordered:
-        return _render_ordered(document)
-    return _render_grouped(document)
+        rendered = _render_ordered(document)
+    else:
+        rendered = _render_grouped(document)
+    if rendered.strip():
+        return rendered
+    return _render_empty_diagnostic(document)
+
+
+def _render_empty_diagnostic(document: NormalizedDocument) -> str:
+    lines: list[str] = [
+        "# (No content extracted)",
+        "",
+        (
+            "The extraction pipeline produced no readable content "
+            "for this document."
+        ),
+        "",
+        f"- Source: `{document.source.source_path}`",
+        f"- File type: `{document.source.file_type}`",
+        (
+            "- Overall confidence: "
+            f"{document.overall_confidence:.2f}"
+        ),
+        f"- Below threshold: {document.below_threshold}",
+    ]
+    routes = [r.route_id for r in document.route_history]
+    if routes:
+        lines.append(f"- Routes attempted: {', '.join(routes)}")
+    if document.warnings:
+        lines.append("")
+        lines.append("## Warnings")
+        for warning in document.warnings:
+            lines.append(f"- {warning}")
+    if document.notes:
+        lines.append("")
+        lines.append("## Notes")
+        for note in document.notes:
+            lines.append(f"- {note}")
+    lines.append("")
+    lines.append(
+        "See the sibling `.log` and `.json` files for full attempt "
+        "history. Common causes: scanned PDF with wrong "
+        "`ocr.language`, missing OCRmyPDF / Tesseract install, or "
+        "Docling failing on this document."
+    )
+    return "\n".join(lines).strip() + "\n"
 
 
 def _render_ordered(document: NormalizedDocument) -> str:

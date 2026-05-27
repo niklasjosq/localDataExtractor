@@ -17,6 +17,7 @@ class ParserContext:
     route_id: str
     debug_dir: Path | None = None
     extra: dict[str, str] = field(default_factory=dict)
+    discard_garbled: bool = True
 
 
 class Parser(Protocol):

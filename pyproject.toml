@@ -45,6 +45,10 @@ quality = [
   "opencv-python-headless>=4.9.0",
   "camelot-py[base]>=0.11.0",
   "scikit-image>=0.22.0",
+  # camelot-py pulls chardet>=3.0.4 with no upper bound, but
+  # requests 2.32 only accepts chardet<6. Pin to a compatible
+  # window so `requests` doesn't emit RequestsDependencyWarning.
+  "chardet>=5.0,<6",
 ]
 dev = [
   "pytest>=8.3.0",
@@ -60,6 +64,9 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+localdataextractor = ["assets/*.svg", "assets/*.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

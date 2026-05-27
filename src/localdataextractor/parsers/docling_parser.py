@@ -7,6 +7,7 @@ from localdataextractor.models import ParsedResult, SourceReference, TableBlock
 from localdataextractor.parsers.base import ParserContext
 from localdataextractor.parsers.common import markdown_to_blocks_and_tables, plain_text_to_blocks
 from localdataextractor.parsers.table_extractors import extract_tables_multi
+from localdataextractor.utils.text_quality import looks_garbled, replacement_ratio
 
 
 class DoclingParser:
@@ -25,15 +26,25 @@ class DoclingParser:
         try:
             from docling.document_converter import DocumentConverter  # type: ignore
 
-            converter = DocumentConverter()
+            converter = _build_docling_converter()
             result = converter.convert(str(path))
             document = getattr(result, "document", None)
             if document is not None:
                 markdown_text = document.export_to_markdown()
             else:
                 markdown_text = str(result)
+            context.logger.info(
+                "docling: %s -> %d markdown chars (garbled=%s)",
+                path.name,
+                len(markdown_text),
+                looks_garbled(markdown_text) if markdown_text else False,
+            )
         except Exception as exc:  # pragma: no cover - optional dependency path
             warnings.append(f"Docling unavailable/failed: {exc}")
+            context.logger.warning(
+                "docling: import/convert failed for %s: %s",
+                path.name, exc,
+            )
 
         table_candidates: list[TableBlock] = []
         notes: list[str] = []
@@ -45,6 +56,29 @@ class DoclingParser:
             notes.extend(table_notes)
 
         if markdown_text.strip():
+            if looks_garbled(markdown_text):
+                ratio = replacement_ratio(markdown_text)
+                if context.discard_garbled:
+                    warnings.append(
+                        f"garbled_text_layer: replacement_ratio="
+                        f"{ratio:.2f} (broken PDF /ToUnicode CMap "
+                        "suspected); discarding text and signalling "
+                        "router to try ocr_docling"
+                    )
+                    return ParsedResult(
+                        parser_name=self.name,
+                        warnings=warnings,
+                        notes=notes,
+                        blocks=[],
+                        tables=table_candidates,
+                        route_notes=route_notes,
+                        scanned_hint=True,
+                    )
+                notes.append(
+                    f"garbled_text_layer: replacement_ratio="
+                    f"{ratio:.2f} (keeping text anyway, "
+                    "discard_garbled=False)"
+                )
             blocks, tables = markdown_to_blocks_and_tables(markdown_text)
             if table_candidates:
                 tables = _replace_or_extend_tables(
@@ -62,6 +96,22 @@ class DoclingParser:
 
         fallback_text, fallback_warnings = _fallback_text_extract(path)
         warnings.extend(fallback_warnings)
+        context.logger.info(
+            "docling: pypdf fallback for %s -> %d chars",
+            path.name, len(fallback_text or ""),
+        )
+        if (
+            fallback_text
+            and context.discard_garbled
+            and looks_garbled(fallback_text)
+        ):
+            ratio = replacement_ratio(fallback_text)
+            warnings.append(
+                f"garbled_text_layer: replacement_ratio="
+                f"{ratio:.2f} in fallback extract; discarding "
+                "text so the router can try ocr_docling"
+            )
+            fallback_text = ""
         blocks = plain_text_to_blocks(fallback_text)
         return ParsedResult(
             parser_name=self.name,
@@ -70,8 +120,56 @@ class DoclingParser:
             blocks=blocks,
             tables=table_candidates,
             route_notes=route_notes,
-            scanned_hint=scanned_hint,
+            scanned_hint=scanned_hint or not fallback_text,
         )
+
+
+_DOCLING_CONVERTER = None
+
+
+def _build_docling_converter():
+    """Build a DocumentConverter pinned to CPU.
+
+    Avoids the Apple Silicon MPS float64 crash in Docling's
+    RT-DETR layout model. Cached because converter construction
+    eagerly loads model weights.
+    """
+    global _DOCLING_CONVERTER
+    if _DOCLING_CONVERTER is not None:
+        return _DOCLING_CONVERTER
+
+    from docling.document_converter import DocumentConverter  # type: ignore
+
+    try:
+        from docling.datamodel.accelerator_options import (  # type: ignore
+            AcceleratorDevice,
+            AcceleratorOptions,
+        )
+        from docling.datamodel.base_models import (  # type: ignore
+            InputFormat,
+        )
+        from docling.datamodel.pipeline_options import (  # type: ignore
+            PdfPipelineOptions,
+        )
+        from docling.document_converter import (  # type: ignore
+            PdfFormatOption,
+        )
+
+        pipeline_options = PdfPipelineOptions()
+        pipeline_options.accelerator_options = AcceleratorOptions(
+            num_threads=4,
+            device=AcceleratorDevice.CPU,
+        )
+        _DOCLING_CONVERTER = DocumentConverter(
+            format_options={
+                InputFormat.PDF: PdfFormatOption(
+                    pipeline_options=pipeline_options,
+                ),
+            },
+        )
+    except Exception:
+        _DOCLING_CONVERTER = DocumentConverter()
+    return _DOCLING_CONVERTER
 
 
 def _replace_or_extend_tables(
@@ -95,14 +193,34 @@ def _replace_or_extend_tables(
 def _fallback_text_extract(path: Path) -> tuple[str, list[str]]:
     warnings: list[str] = []
     if path.suffix.lower() == ".pdf":
+        pypdf_text = ""
         try:
             from pypdf import PdfReader  # type: ignore
 
             reader = PdfReader(str(path))
-            text = "\n\n".join(page.extract_text() or "" for page in reader.pages)
-            return text, warnings
+            pypdf_text = "\n\n".join(
+                page.extract_text() or "" for page in reader.pages
+            )
         except Exception as exc:  # pragma: no cover
             warnings.append(f"pypdf fallback failed: {exc}")
+
+        if pypdf_text.strip():
+            return pypdf_text, warnings
+
+        # pypdf frequently returns empty on OCRmyPDF's invisible text
+        # layer. pdfplumber handles that layer correctly.
+        try:
+            import pdfplumber  # type: ignore
+
+            with pdfplumber.open(str(path)) as pdf:
+                pages_text = [
+                    (page.extract_text() or "") for page in pdf.pages
+                ]
+            plumber_text = "\n\n".join(pages_text)
+            return plumber_text, warnings
+        except Exception as exc:  # pragma: no cover
+            warnings.append(f"pdfplumber fallback failed: {exc}")
+            return pypdf_text, warnings
     try:
         return path.read_text(encoding="utf-8", errors="replace"), warnings
     except Exception as exc:  # pragma: no cover

@@ -4,10 +4,85 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+import os
 import tomllib
 
 
 LOCALHOST_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+ENV_TOKEN_VAR = "LDX_LMSTUDIO_API_TOKEN"
+
+_LAST_DOTENV_LOADED: Path | None = None
+
+
+def last_dotenv_loaded() -> Path | None:
+    """Return the .env path picked up by the most recent load_config(),
+    or None if no .env file was discovered."""
+    return _LAST_DOTENV_LOADED
+
+
+def _load_dotenv(dotenv_path: Path) -> None:
+    """Minimal .env reader: KEY=VALUE per line, # comments, optional
+    surrounding quotes. Existing os.environ entries take precedence."""
+    if not dotenv_path.is_file():
+        return
+    try:
+        for raw in dotenv_path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):].lstrip()
+            if "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            if (
+                len(value) >= 2
+                and value[0] == value[-1]
+                and value[0] in {'"', "'"}
+            ):
+                value = value[1:-1]
+            if key and key not in os.environ:
+                os.environ[key] = value
+    except OSError:
+        return
+
+
+def _find_project_root() -> Path | None:
+    """Walk up from this source file looking for a pyproject.toml or
+    .git marker. Reliable on editable installs, returns None when
+    installed into site-packages."""
+    start = Path(__file__).resolve()
+    for parent in [start, *start.parents]:
+        if (parent / "pyproject.toml").is_file():
+            return parent
+        if (parent / ".git").exists():
+            return parent
+    return None
+
+
+def _find_dotenv(config_path: Path | None) -> Path | None:
+    explicit = os.environ.get("LDX_DOTENV", "").strip()
+    if explicit:
+        candidate = Path(explicit).expanduser()
+        if candidate.is_file():
+            return candidate
+
+    candidates: list[Path] = [Path.cwd() / ".env"]
+    if config_path:
+        candidates.append(config_path.parent / ".env")
+    project_root = _find_project_root()
+    if project_root is not None:
+        candidates.append(project_root / ".env")
+    candidates.append(
+        Path.home() / ".config" / "localdataextractor" / ".env"
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 @dataclass(slots=True)
@@ -19,6 +94,7 @@ class LLMConfig:
     retries: int = 2
     temperature: float = 0.1
     enable_vlm_repair: bool = True
+    api_token: str = field(default="", repr=False)
 
 
 @dataclass(slots=True)
@@ -44,6 +120,7 @@ class OCRConfig:
     clean: bool = True
     optimize: int = 0
     language: str = "eng"
+    force_when_garbled: bool = True
 
 
 @dataclass(slots=True)
@@ -170,6 +247,7 @@ def _defaults_dict() -> dict[str, Any]:
 
 def load_config(config_path: str | Path | None = None) -> AppConfig:
     data = _defaults_dict()
+    resolved_path: Path | None = None
     if config_path:
         path = Path(config_path)
         if not path.exists():
@@ -177,6 +255,13 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         with path.open("rb") as f:
             user_data = tomllib.load(f)
         data = _merge_dict(data, user_data)
+        resolved_path = path
+
+    global _LAST_DOTENV_LOADED
+    dotenv_path = _find_dotenv(resolved_path)
+    _LAST_DOTENV_LOADED = dotenv_path
+    if dotenv_path is not None:
+        _load_dotenv(dotenv_path)
 
     config = AppConfig(
         llm=LLMConfig(**data.get("llm", {})),
@@ -196,6 +281,10 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         glm_ocr=GLMOCRConfig(**data.get("glm_ocr", {})),
         logging=LoggingConfig(**data.get("logging", {})),
     )
+    if not config.llm.api_token:
+        env_token = os.environ.get(ENV_TOKEN_VAR, "").strip()
+        if env_token:
+            config.llm.api_token = env_token
     validate_config(config)
     return config
 
@@ -254,7 +343,9 @@ def write_sample_config(path: str | Path) -> None:
         "timeout_seconds = 120\n"
         "retries = 2\n"
         "temperature = 0.1\n"
-        "enable_vlm_repair = true\n\n"
+        "enable_vlm_repair = true\n"
+        '# Set if your LM Studio server requires an API key:\n'
+        'api_token = ""\n\n'
         "[retry]\n"
         "confidence_threshold = 95.0\n"
         "max_route_attempts = 5\n"
@@ -270,7 +361,8 @@ def write_sample_config(path: str | Path) -> None:
         "deskew = true\n"
         "clean = true\n"
         "optimize = 0\n"
-        'language = "eng"\n\n'
+        'language = "eng"\n'
+        "force_when_garbled = true\n\n"
         "[tables]\n"
         "high_effort = true\n"
         "important_row_min = 2\n"

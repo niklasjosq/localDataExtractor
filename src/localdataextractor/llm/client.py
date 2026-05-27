@@ -66,12 +66,26 @@ class LMStudioClient:
         if parsed.hostname not in LOCALHOST_HOSTS:
             raise ValueError("LM Studio base URL must be localhost only")
 
+    def _headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        token = getattr(self.config, "api_token", "")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
+
     def check_server(self) -> tuple[bool, str]:
         try:
             resp = requests.get(
                 f"{self.config.base_url.rstrip('/')}/models",
+                headers=self._headers(),
                 timeout=min(10, self.config.timeout_seconds),
             )
+            if resp.status_code == 401:
+                return False, (
+                    "HTTP 401: LM Studio requires an API token. "
+                    "Set llm.api_token in config.toml or paste it in "
+                    "the GUI API Token field."
+                )
             if resp.status_code != 200:
                 return False, f"HTTP {resp.status_code}: {resp.text[:200]}"
             data = resp.json()
@@ -87,6 +101,7 @@ class LMStudioClient:
         try:
             resp = requests.get(
                 f"{self.config.base_url.rstrip('/')}/models",
+                headers=self._headers(),
                 timeout=min(15, self.config.timeout_seconds),
             )
             resp.raise_for_status()
@@ -135,7 +150,7 @@ class LMStudioClient:
         raw = ""
         try:
             resp = requests.post(
-                url, json=payload, timeout=t,
+                url, json=payload, headers=self._headers(), timeout=t,
             )
             if resp.status_code != 200:
                 msg = resp.text[:200]
@@ -168,6 +183,7 @@ class LMStudioClient:
             resp = requests.post(
                 f"{self.config.base_url.rstrip('/')}/chat/completions",
                 json=payload,
+                headers=self._headers(),
                 timeout=self.config.timeout_seconds,
             )
             if resp.status_code != 200:

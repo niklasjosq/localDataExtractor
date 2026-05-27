@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from localdataextractor.config import AppConfig
 from localdataextractor.models import ConfidenceReport, ParsedResult, TableBlock
 from localdataextractor.quality.table_validation import TableValidationResult, validate_table
+from localdataextractor.utils.text_quality import replacement_ratio
 
 
 @dataclass(slots=True)
@@ -41,6 +42,20 @@ def score_extraction(parsed: ParsedResult, config: AppConfig, extension: str) ->
     text_length = sum(len(block.text) for block in parsed.blocks)
     weak_extraction = text_length < config.routing.min_characters_for_good_extraction
 
+    garbled_penalty = 0.0
+    max_garbled_ratio = max(
+        (replacement_ratio(b.text) for b in parsed.blocks),
+        default=0.0,
+    )
+    if max_garbled_ratio > 0.05:
+        garbled_penalty = 60.0
+        garbled_warning = (
+            f"garbled_text_layer: max replacement_ratio="
+            f"{max_garbled_ratio:.2f}"
+        )
+        if garbled_warning not in parsed.warnings:
+            parsed.warnings.append(garbled_warning)
+
     base = 100.0
     warning_penalty = min(20.0, len(parsed.warnings) * 3.0)
     weak_penalty = 12.0 if weak_extraction else 0.0
@@ -56,7 +71,7 @@ def score_extraction(parsed: ParsedResult, config: AppConfig, extension: str) ->
         avg_table = sum(table_scores.values()) / len(table_scores)
         table_penalty = max(0.0, 100.0 - avg_table) * 0.8
 
-    overall = max(0.0, min(100.0, base - warning_penalty - weak_penalty - no_blocks_penalty - block_penalty - table_penalty))
+    overall = max(0.0, min(100.0, base - warning_penalty - weak_penalty - no_blocks_penalty - block_penalty - table_penalty - garbled_penalty))
 
     report = ConfidenceReport(
         overall=round(overall, 2),

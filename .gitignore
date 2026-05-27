@@ -15,9 +15,11 @@ htmlcov/
 config.toml
 .env
 .env.*
+!.env.example
 
 # Runtime outputs
 output/
+input/
 _out_smoke/
 *.log
 

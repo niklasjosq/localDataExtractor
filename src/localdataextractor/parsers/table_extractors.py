@@ -211,6 +211,8 @@ def _pdfplumber_strategy(
 def _camelot_strategy(
     path: Path, flavor: str,
 ) -> tuple[list[TableCandidate], list[str], list[str]]:
+    import warnings as _pywarnings
+
     warnings: list[str] = []
     notes: list[str] = []
     out: list[TableCandidate] = []
@@ -222,9 +224,20 @@ def _camelot_strategy(
         return out, warnings, notes
 
     try:
-        tables = camelot.read_pdf(
-            str(path), pages="all", flavor=flavor,
-        )
+        with _pywarnings.catch_warnings():
+            _pywarnings.filterwarnings(
+                "ignore",
+                message=r"page-\d+ is image-based.*",
+                category=UserWarning,
+            )
+            _pywarnings.filterwarnings(
+                "ignore",
+                message=r"No tables found in table area.*",
+                category=UserWarning,
+            )
+            tables = camelot.read_pdf(
+                str(path), pages="all", flavor=flavor,
+            )
     except Exception as exc:
         msg = str(exc).lower()
         if "ghostscript" in msg or "no tables found" in msg:

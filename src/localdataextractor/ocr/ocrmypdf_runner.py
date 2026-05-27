@@ -6,10 +6,15 @@ import subprocess
 from localdataextractor.config import OCRConfig
 
 
-def run_ocrmypdf(input_pdf: Path, output_pdf: Path, config: OCRConfig) -> tuple[bool, str]:
+def run_ocrmypdf(
+    input_pdf: Path,
+    output_pdf: Path,
+    config: OCRConfig,
+    force: bool = False,
+) -> tuple[bool, str]:
     cmd = [
         "ocrmypdf",
-        "--skip-text",
+        "--force-ocr" if force else "--skip-text",
         "--output-type",
         "pdf",
         "--jobs",

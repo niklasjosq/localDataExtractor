@@ -390,6 +390,15 @@ class IngestionPipeline:
             best_doc.below_threshold = True
 
         markdown = render_markdown(best_doc)
+        file_logger.info(
+            "Writing markdown: best_route=%s best_conf=%.2f "
+            "blocks=%d tables=%d md_chars=%d",
+            best_route,
+            best_conf,
+            len(best_doc.blocks_ordered),
+            len(best_doc.tables),
+            len(markdown),
+        )
         write_json(json_path, dataclass_to_dict(best_doc))
         md_path.write_text(markdown, encoding="utf-8")
 

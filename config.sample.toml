@@ -6,6 +6,8 @@ timeout_seconds = 120
 retries = 2
 temperature = 0.1
 enable_vlm_repair = true
+# Optional bearer token if your LM Studio server requires auth:
+api_token = ""
 
 [retry]
 confidence_threshold = 95.0
@@ -25,6 +27,9 @@ deskew = true
 clean = true
 optimize = 0
 language = "eng"
+# When a PDF's existing text layer extracts as garbled Unicode
+# (broken /ToUnicode CMap), re-OCR every page with --force-ocr.
+force_when_garbled = true
 
 [tables]
 high_effort = true

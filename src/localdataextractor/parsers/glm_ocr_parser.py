@@ -390,6 +390,16 @@ class GLMOCRParser:
             all_blocks.extend(page_blocks)
             all_tables.extend(page_tables)
 
+        context.logger.info(
+            "glm_ocr: produced blocks=%d tables=%d warnings=%d "
+            "(model=%s, pages=%d)",
+            len(all_blocks),
+            len(all_tables),
+            len(warnings),
+            glm_cfg.model_name,
+            len(processed),
+        )
+
         return ParsedResult(
             parser_name=self.name,
             blocks=all_blocks,
